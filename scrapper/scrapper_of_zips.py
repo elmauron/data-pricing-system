@@ -434,5 +434,3 @@ conn.commit()
 
 print('Esto es lo último:' + '\n')
 print(new_temp_df)
-
-
