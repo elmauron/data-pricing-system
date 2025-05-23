@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from dotenv import load_dotenv
 import os
 import requests
@@ -47,19 +48,58 @@ def web_scrap(url):                                              # metodo para s
         print("Failed to fetch page. Status code: ", response.status_code)
 
     # Buscar todos los <a> que tengan ".zip" en su href
-    links_zip = [
-        a['href']
-        for a in soup.find_all('a', href=True)
-        if ".zip" in a ['href']
-    ]
 
-    url = links_zip[1]
-    print (f"Descargando: {url}")
+    links_anuales_array = []
+    links_mensuales_array = []
 
-    response = requests.get(url)
-    zip_en_memoria = BytesIO(response.content)
+    for a in soup.find_all('a', href=True):
+        nombre = a.text
+        href = a['href']
+        if ".zip" in href:
+            if re.search(r"20\d{2}\.zip$", nombre):
+                links_anuales_array.append(href)
+            else:
+                links_mensuales_array.append(href)
+  
 
-    return zip_en_memoria
+    zips_anuales = []
+    df_array = []
+
+    for link in links_anuales_array: 
+      print (f"Descargando: {link}")
+      response = requests.get(link)
+      zips_anuales.append(BytesIO(response.content))
+
+    for zip_mes in zips_anuales:
+        
+        with zipfile.ZipFile(zip_mes) as zf:
+          print (">>> Archivos encontrados en el ZIP: ") #<---------DEBERIA MOSTRAR TODOS LOS MESES DE CADA Añ0
+          print (zf.namelist())
+          
+          for nombre_archivo in zf.namelist():
+
+            print(">>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<")
+            print(nombre_archivo)
+
+            archivo_leido = zf.read(nombre_archivo)
+
+            with zipfile.ZipFile(BytesIO(archivo_leido)) as zm:
+                for archivo_xls in zm.namelist():
+                    if archivo_xls.endswith('.XLS') or archivo_xls.endswith('.xls'):
+                         
+                         fecha_string = archivo_xls[2:4] + "/" + archivo_xls[4:6] + "/" + archivo_xls[6:8]
+                         print("\n" + f"Leyendo archivo del día: {fecha_string}" + "\n")
+
+                         with zm.open(archivo_xls) as archivo:
+                               df = pd.read_excel(archivo, engine='xlrd') # df = DATAFRAME
+                               df['fecha'] = datetime.strptime(fecha_string, "%d/%m/%y").date()  # <---- PONE LA FECHA
+                               df.columns = df.columns.str.replace(r'\d{6}$', '', regex=True) # <----- ELIMINO NUMEROS REDUNDANTES DE COLUMNAS DE PRECIOS 
+                               df_array.append(df)
+
+    print(df_array)
+
+    master_df = normalize_dataFrames(df_array)
+    return master_df
 
 def normalize_dataFrames(df_array):                              # metodo para normalizar arrays de dataframes y concatenarlos en uno solo
   # TENGO QUE ELIMINAR LOS PROM.ESP
@@ -90,30 +130,7 @@ def normalize_dataFrames(df_array):                              # metodo para n
     big_df = pd.concat(normalized, ignore_index=True)
     big_df = big_df.reset_index().rename(columns={'index':'temp_id'})
 
-    return(big_df)    
-
-def read_xls(zip_en_memoria):                                    # metodo para recorrer todos los zip y serializarlos en dataframes
-#Reviso el zip, leo los archivos y los devuelvo en forma de DATAFRAME
-    df_array = []
-
-    with zipfile.ZipFile(zip_en_memoria) as zf:
-        print ("Archivos encontrados en el ZIP: ")
-        print (zf.namelist())
-
-        for nombre_archivo in zf.namelist():
-            if nombre_archivo.endswith('.XLS') or nombre_archivo.endswith('.xls'):
-                fecha_string = nombre_archivo[2:4] + "/" + nombre_archivo[4:6] + "/" + nombre_archivo[6:8]
-
-                print("\n" + f"Leyendo archivo del día: {fecha_string}" + "\n")
-
-                with zf.open(nombre_archivo) as archivo_xls:
-                    df = pd.read_excel(archivo_xls, engine='xlrd') # df = DATAFRAME
-                    df['fecha'] = datetime.strptime(fecha_string, "%d/%m/%y").date()  # <---- PONE LA FECHA
-                    df.columns = df.columns.str.replace(r'\d{6}$', '', regex=True) # <----- ELIMINO NUMEROS REDUNDANTES DE COLUMNAS DE PRECIOS 
-                    df_array.append(df)
-                    master_df = normalize_dataFrames(df_array)
-
-    return (master_df)               
+    return(big_df)               
 
 def check_table_exists(curr, table_name):
     curr.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
@@ -396,10 +413,7 @@ def append_from_df_to_db(curr,df):
 
 #==========================================================================================
 # Scrapeo los datos de la web
-data_scrapeada = web_scrap(url)
-
-master_df = read_xls(data_scrapeada)                                        # Proceso los datos y los transformo en un array de dataframes (cada dia es un dataframe)
-print (master_df)
+master_df = web_scrap(url)
 
 try:
   conn = conectar_a_db(host_name, dbname, username, password, port)         # Me conecto a la base de datos
