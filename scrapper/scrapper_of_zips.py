@@ -39,6 +39,17 @@ def conectar_a_db (host_name, dbname, username, password, port): # metodo para h
         print('CONECTADO>>>') 
     return conn       
 
+def verificar_enlace(url):
+    try:
+        response = requests.head(url, allow_redirects=True, timeout=5)
+        # Si el servidor no maneja HEAD, hacé un GET con stream=True
+        if response.status_code >= 400:
+            response = requests.get(url, stream=True, allow_redirects=True, timeout=5)
+        return response.status_code == 200
+    except requests.RequestException as e:
+        print(f"Error verificando {url}: {e}")
+        return False
+
 def web_scrap(url):                                              # metodo para sacar los datos de la web in guardarlos temporalmente en un zip en memoria
     response = requests.get(url)
     if response.status_code == 200:
@@ -55,15 +66,44 @@ def web_scrap(url):                                              # metodo para s
     for a in soup.find_all('a', href=True):
         nombre = a.text
         href = a['href']
-        if ".zip" in href:
+        if ".zip" in href and verificar_enlace(href):
             if re.search(r"20\d{2}\.zip$", nombre):
                 links_anuales_array.append(href)
             else:
                 links_mensuales_array.append(href)
   
-
     zips_anuales = []
+    zips_mensuales = []
     df_array = []
+
+    for link in links_mensuales_array:
+        print (f"Descargando: {link}")
+        response = requests.get(link)
+        zips_mensuales.append(BytesIO(response.content))
+
+    for zip_mes in zips_mensuales:
+        
+        with zipfile.ZipFile(zip_mes) as zf:
+          print (">>> Archivos encontrados en el ZIP: ") #<---------DEBERIA MOSTRAR TODOS LOS MESES DE CADA Añ0
+          print (zf.namelist())
+          
+          for archivo_xls in zf.namelist():
+
+            print(">>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<")
+            print(archivo_xls)
+
+
+            if archivo_xls.endswith('.XLS') or archivo_xls.endswith('.xls'):
+                     
+                 fecha_string = archivo_xls[2:4] + "/" + archivo_xls[4:6] + "/" + archivo_xls[6:8]
+                 print("\n" + f"Leyendo archivo del día: {fecha_string}" + "\n")
+
+                 with zf.open(archivo_xls) as archivo:
+                       df = pd.read_excel(archivo, engine='xlrd') # df = DATAFRAME
+                       df['fecha'] = datetime.strptime(fecha_string, "%d/%m/%y").date()  # <---- PONE LA FECHA
+                       df.columns = df.columns.str.replace(r'\d{6}$', '', regex=True) # <----- ELIMINO NUMEROS REDUNDANTES DE COLUMNAS DE PRECIOS 
+                       df_array.append(df)
+      
 
     for link in links_anuales_array: 
       print (f"Descargando: {link}")
